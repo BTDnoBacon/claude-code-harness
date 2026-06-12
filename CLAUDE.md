@@ -23,15 +23,17 @@ User requirement
   [Planner]  →  writes tasks.md
       │
       ▼
-  [Developer]  →  implements one task, writes review_request.md
+  [Developer]  →  reads notes.md (if exists), implements one task, writes review_request.md
       │
       ▼
-  [Reviewer]  →  writes review_result.md
+  [Reviewer]  →  reads review_history.md (if exists), writes review_result.md + appends review_history.md
       │
    APPROVED?
-   ├── YES  →  main session commits, move to next task
-   └── NO   →  Developer revises (round += 1)
-                  if round > 3 → escalate to user
+   ├── YES  →  main session updates task status [dev-done] → [done] in tasks.md
+   │            then commits, then notifies (notify.sh approved), then moves to next task
+   │            if all tasks [done] → notify.sh done
+   └── NO   →  notify.sh rejected, Developer revises (round += 1)
+                  if round > 3 → notify.sh escalated, escalate to user
 ```
 
 ### Review loop limit
@@ -49,9 +51,10 @@ All inter-agent communication happens through files under `projects/{project_nam
 |------|-----------|---------|
 | `tasks.md` | Planner | Developer, main session |
 | `review_request.md` | Developer | Reviewer |
-| `review_result.md` | Reviewer | main session |
+| `review_result.md` | Reviewer (overwrite) | main session |
+| `review_history.md` | Reviewer (append) | Reviewer (next round) |
 | `blockers.md` | Developer | main session (escalate to user) |
-| `notes.md` | Developer | next Developer invocation |
+| `notes.md` | Developer | Developer (next invocation) |
 
 The main session is responsible for creating `projects/{project_name}/.state/` if it doesn't exist.
 
@@ -65,8 +68,27 @@ The main session is responsible for creating `projects/{project_name}/.state/` i
 
 ---
 
+## Notification Rules
+
+See `.claude/rules/notifications.md` for full details.
+
+Call `scripts/notify.sh` at these moments (non-blocking — exits silently if no webhook is set):
+
+```bash
+./scripts/notify.sh approved  "TASK-XXX: <title> committed"
+./scripts/notify.sh rejected  "TASK-XXX Round N: <first rejection reason>"
+./scripts/notify.sh blocked   "TASK-XXX is blocked: <summary>"
+./scripts/notify.sh escalated "TASK-XXX: max rounds exceeded — needs human input"
+./scripts/notify.sh done      "Project <name>: all tasks complete"
+```
+
+---
+
 ## Common Operations
 
 - Start a new project: create `projects/{project_name}/` and `.state/`, then invoke Planner.
 - Resume work: read `tasks.md` to find the first task not marked `[done]`.
+  - `[ ]` = 아직 시작 안 함
+  - `[dev-done]` = 개발 완료, 리뷰 대기 중 (또는 리뷰 진행 중)
+  - `[done]` = APPROVED + 커밋 완료
 - Check for blockers: read `blockers.md` before invoking Developer.
